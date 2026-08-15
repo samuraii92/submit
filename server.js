@@ -230,9 +230,19 @@ const dashboardHTML = `
 `;
 
 // ==========================================
-// 3. إنشاء سيرفر الـ HTTP (لعرض الداشبورد)
+// 3. إنشاء سيرفر الـ HTTP (لعرض الداشبورد + API)
 // ==========================================
 const server = http.createServer((req, res) => {
+    // 🚀 واجهة API سريعة جداً للصفحات لكي تجلب الرقم مباشرة
+    if (req.url === '/api/config') {
+        res.writeHead(200, { 
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*' // السماح لجميع المواقع بطلب البيانات
+        });
+        res.end(JSON.stringify({ maxRequests: currentMaxRequests }));
+        return;
+    }
+
     if (req.url === '/') {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(dashboardHTML);
