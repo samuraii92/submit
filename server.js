@@ -9,7 +9,7 @@ const PORT = process.env.PORT || 8080;
 // ==========================================
 let isLocked = false;
 const LOCK_DURATION = 4 * 60 * 1000; // 4 دقائق بالملي ثانية
-let currentMaxRequests = 0; // العدد الافتراضي للطلبات
+let currentMaxRequests = 1; // العدد الافتراضي للطلبات
 let timeRecords = {}; // كائن لتخزين الأوقات مفروزة بالدقيقة
 
 const dashboardHTML = `
