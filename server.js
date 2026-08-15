@@ -290,6 +290,13 @@ wss.on('connection', (ws) => {
     ws.on('pong', () => { ws.isAlive = true; });
 
     ws.on('message', (message) => {
+            if (data.action === 'SYNC_ME_PLEASE') {
+                ws.send(JSON.stringify({
+                    action: 'UPDATE_MAX_REQUESTS',
+                    value: currentMaxRequests
+                }));
+                return;
+            }
         try {
             const data = JSON.parse(message);
 
