@@ -9,9 +9,12 @@ const PORT = process.env.PORT || 8080;
 // ==========================================
 let isLocked = false;
 const LOCK_DURATION = 4 * 60 * 1000; // 4 دقائق بالملي ثانية
-let currentMaxRequests = 1; // العدد الافتراضي للطلبات
+let currentMaxRequests = 0; // العدد الافتراضي للطلبات
 let timeRecords = {}; // كائن لتخزين الأوقات مفروزة بالدقيقة
 
+// ==========================================
+// 2. واجهة الداشبورد (Cyberpunk Style)
+// ==========================================
 const dashboardHTML = `
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -21,21 +24,13 @@ const dashboardHTML = `
     <title>Ninja Command Center 🥷</title>
     <style>
         :root {
-            --bg: #09090b;
-            --card-bg: #18181b;
-            --border: #27272a;
-            --primary: #3b82f6;
-            --success: #10b981;
-            --danger: #ef4444;
-            --warning: #f59e0b;
-            --text-main: #f4f4f5;
-            --text-muted: #a1a1aa;
+            --bg: #09090b; --card-bg: #18181b; --border: #27272a;
+            --primary: #3b82f6; --success: #10b981; --danger: #ef4444;
+            --warning: #f59e0b; --text-main: #f4f4f5; --text-muted: #a1a1aa;
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, sans-serif; }
-        
         body { background-color: var(--bg); color: var(--text-main); padding: 20px; line-height: 1.6; }
-        
         .container { max-width: 1200px; margin: 0 auto; }
         
         .header { text-align: center; margin-bottom: 40px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
@@ -59,7 +54,6 @@ const dashboardHTML = `
 
         .card h2 { font-size: 1.3rem; margin-bottom: 15px; display: flex; align-items: center; gap: 10px; color: var(--text-main); }
         
-        /* Control Section */
         .val-display { font-size: 2.5rem; font-weight: bold; color: var(--primary); text-shadow: 0 0 10px rgba(59, 130, 246, 0.3); margin: 10px 0; }
         .input-group { display: flex; gap: 10px; margin-top: 15px; }
         input[type="number"] { flex: 1; padding: 12px; border-radius: 8px; border: 1px solid var(--border); background: #000; color: #fff; font-size: 1.1rem; text-align: center; outline: none; transition: border 0.3s; }
@@ -67,7 +61,6 @@ const dashboardHTML = `
         button { padding: 12px 24px; background: var(--primary); color: white; border: none; border-radius: 8px; font-size: 1rem; font-weight: bold; cursor: pointer; transition: 0.2s; box-shadow: 0 0 15px rgba(59, 130, 246, 0.4); }
         button:hover { background: #2563eb; transform: scale(1.02); }
 
-        /* Status Section */
         .status-indicator { display: flex; align-items: center; justify-content: center; flex-direction: column; height: 100%; padding: 20px 0; }
         .pulse-ring { width: 60px; height: 60px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-bottom: 15px; position: relative; }
         .pulse-ring::after { content: ''; position: absolute; width: 100%; height: 100%; border-radius: 50%; animation: pulse 2s infinite; }
@@ -81,23 +74,16 @@ const dashboardHTML = `
         .status-open .status-text { color: var(--success); }
         .status-locked .status-text { color: var(--danger); }
 
-        /* Records Section */
         .minute-group { background: #000; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 20px; overflow: hidden; }
         .minute-header { background: #1a1a24; padding: 12px 20px; font-weight: bold; font-size: 1.1rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; color: var(--primary); }
         .records-list { padding: 15px; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
         
         .time-item { background: var(--card-bg); border: 1px solid var(--border); padding: 10px 15px; border-radius: 6px; font-family: monospace; font-size: 1.1rem; text-align: center; color: var(--text-muted); transition: 0.3s; }
         
-        /* The Winner Style */
         .time-item.winner { 
-            background: rgba(245, 158, 11, 0.1); 
-            border: 1px solid var(--warning); 
-            color: var(--warning); 
-            font-size: 1.25rem; 
-            font-weight: bold; 
-            box-shadow: 0 0 15px rgba(245, 158, 11, 0.2);
-            grid-column: 1 / -1; /* يجعله يأخذ العرض كاملاً في الأعلى */
-            display: flex; justify-content: center; align-items: center; gap: 10px;
+            background: rgba(245, 158, 11, 0.1); border: 1px solid var(--warning); color: var(--warning); 
+            font-size: 1.25rem; font-weight: bold; box-shadow: 0 0 15px rgba(245, 158, 11, 0.2);
+            grid-column: 1 / -1; display: flex; justify-content: center; align-items: center; gap: 10px;
         }
         
         @keyframes pulse { 0% { transform: scale(0.95); opacity: 1; } 100% { transform: scale(1.5); opacity: 0; } }
@@ -115,7 +101,6 @@ const dashboardHTML = `
         </div>
 
         <div class="dashboard-grid">
-            <!-- Control Card -->
             <div class="card ctrl">
                 <h2>⚙️ تحكم الطلبات (maxRequests)</h2>
                 <div style="color: var(--text-muted); font-size: 0.9rem;">العدد الحالي المحفوظ في جميع المتصفحات المتصلة:</div>
@@ -126,7 +111,6 @@ const dashboardHTML = `
                 </div>
             </div>
 
-            <!-- Status Card -->
             <div class="card status" id="statusCard">
                 <h2>📡 حالة الهجوم المركزية</h2>
                 <div class="status-indicator status-open" id="statusIndicator">
@@ -137,7 +121,6 @@ const dashboardHTML = `
             </div>
         </div>
 
-        <!-- Records Card -->
         <div class="card records">
             <h2>⏱️ سجل "توقيت العويسي" (الفرز المباشر)</h2>
             <div id="recordsContainer">
@@ -167,10 +150,8 @@ const dashboardHTML = `
             ws.onmessage = (e) => {
                 const data = JSON.parse(e.data);
                 if (data.action === 'DASHBOARD_SYNC') {
-                    // Update Requests count
                     document.getElementById('currentMax').innerText = data.maxRequests;
                     
-                    // Update Lock Status UI
                     const statusCard = document.getElementById('statusCard');
                     const indicator = document.getElementById('statusIndicator');
                     const text = document.getElementById('lockStatus');
@@ -191,7 +172,6 @@ const dashboardHTML = `
                         subtext.innerText = 'السيرفر مفتوح وينتظر كشاف 200 OK';
                     }
 
-                    // Render Records
                     renderRecords(data.records);
                 }
             };
@@ -213,7 +193,6 @@ const dashboardHTML = `
             const minutes = Object.keys(records).sort().reverse(); 
             
             if(minutes.length === 0) return;
-
             container.innerHTML = '';
             
             minutes.forEach(minute => {
@@ -230,7 +209,6 @@ const dashboardHTML = `
 
                 records[minute].forEach((timeStr, index) => {
                     const timeEl = document.createElement('div');
-                    // الفائز (أول عنصر بعد الفرز) يأخذ الستايل المميز
                     if(index === 0) {
                         timeEl.className = 'time-item winner';
                         timeEl.innerHTML = \`🏆 الأسرع: \${timeStr}\`;
@@ -245,7 +223,6 @@ const dashboardHTML = `
                 container.appendChild(groupDiv);
             });
         }
-
         connect();
     </script>
 </body>
@@ -270,7 +247,6 @@ const server = http.createServer((req, res) => {
 // ==========================================
 const wss = new WebSocket.Server({ server });
 
-// دالة لتحديث البيانات في كل الداشبوردات المفتوحة
 function updateDashboards() {
     const payload = JSON.stringify({
         action: 'DASHBOARD_SYNC',
@@ -290,6 +266,10 @@ wss.on('connection', (ws) => {
     ws.on('pong', () => { ws.isAlive = true; });
 
     ws.on('message', (message) => {
+        try {
+            const data = JSON.parse(message); // أولاً نفك تشفير البيانات
+
+            // 🔥 طلب المزامنة من الإضافة عند استيقاظها (المكان الصحيح)
             if (data.action === 'SYNC_ME_PLEASE') {
                 ws.send(JSON.stringify({
                     action: 'UPDATE_MAX_REQUESTS',
@@ -297,22 +277,19 @@ wss.on('connection', (ws) => {
                 }));
                 return;
             }
-        try {
-            const data = JSON.parse(message);
 
-            // أ. تسجيل لوحة التحكم (الداشبورد) عند الدخول
+            // تسجيل لوحة التحكم (الداشبورد)
             if (data.action === 'REGISTER_DASHBOARD') {
                 ws.isDashboard = true;
-                updateDashboards(); // إرسال الداتا فوراً
+                updateDashboards(); 
                 return;
             }
 
-            // ب. استقبال طلب تغيير عدد الطلبات من الداشبورد
+            // استقبال طلب تغيير عدد الطلبات من الداشبورد
             if (data.action === 'SET_MAX_REQUESTS') {
                 currentMaxRequests = parseInt(data.value, 10);
                 console.log(`[DAHSBOARD] 🔄 تم تعديل الطلبات إلى: ${currentMaxRequests}`);
                 
-                // إرسال التحديث لجميع المتصفحات (الإضافات) المتصلة
                 wss.clients.forEach(client => {
                     if (client.readyState === WebSocket.OPEN && !client.isDashboard) {
                         client.send(JSON.stringify({
@@ -321,39 +298,25 @@ wss.on('connection', (ws) => {
                         }));
                     }
                 });
-                updateDashboards(); // تحديث الرقم في الداشبورد نفسه
+                updateDashboards();
                 return;
             }
 
-            // ج. استقبال إشارة 200 OK من الكشاف (الرصد الشبكي)
+            // استقبال إشارة 200 OK من الكشاف
             if (data.action === 'SLOT_200_OK_FOUND') {
-                const exactTime = data.time || "00:00:00.000"; // توقيت العويسي
+                const exactTime = data.time || "00:00:00.000";
                 
-                // --- نظام الفرز والتسجيل ---
-                // استخراج الدقيقة (مثال: من 14:25:30.150 نأخذ 14:25 فقط كـ مفتاح)
                 const minuteKey = exactTime.substring(0, 5);
+                if (!timeRecords[minuteKey]) timeRecords[minuteKey] = [];
                 
-                if (!timeRecords[minuteKey]) {
-                    timeRecords[minuteKey] = [];
-                }
-                
-                // إضافة التوقيت إذا لم يكن مسجلاً مسبقاً لمنع التكرار التام
                 if (!timeRecords[minuteKey].includes(exactTime)) {
                     timeRecords[minuteKey].push(exactTime);
-                    // فرز المصفوفة (بما أن التنسيق نصي وثابت، سيتم وضع الثواني والميلي ثانية الأصغر في القمة)
-                    timeRecords[minuteKey].sort();
+                    timeRecords[minuteKey].sort(); // وضع الأسرع في الأعلى
                 }
-                
-                // إرسال التوقيت فورا للداشبورد ليظهر لك
                 updateDashboards(); 
 
-                // --- نظام الهجوم والقفل الـ 4 دقائق ---
-                if (isLocked) {
-                    console.log(`🔒 [تجاهل هجوم] إشارة 200 OK بتوقيت ${exactTime} (السيرفر مقفل)`);
-                    return;
-                }
+                if (isLocked) return; // تجاهل الهجوم إذا كان السيرفر مقفلاً
 
-                // هذا أول كشاف! أقفل السيرفر وهاجم!
                 isLocked = true;
                 console.log(`⚡ [هجوم] أول إشارة وصلت بتوقيت ${exactTime}! جاري الهجوم وقفل السيرفر...`);
 
@@ -363,9 +326,8 @@ wss.on('connection', (ws) => {
                     }
                 });
 
-                updateDashboards(); // تحديث حالة القفل في الداشبورد إلى "مقفل"
+                updateDashboards(); 
 
-                // فك القفل بعد 4 دقائق
                 setTimeout(() => {
                     isLocked = false;
                     console.log('🔓 [مفتوح] انتهت الـ 4 دقائق. السيرفر مستعد.');
@@ -379,7 +341,6 @@ wss.on('connection', (ws) => {
     });
 });
 
-// نظام النبضات (Keep-Alive) لمنع Render من قطع الاتصال
 const pingInterval = setInterval(() => {
     wss.clients.forEach((ws) => {
         if (ws.isAlive === false) return ws.terminate();
@@ -390,7 +351,6 @@ const pingInterval = setInterval(() => {
 
 wss.on('close', () => { clearInterval(pingInterval); });
 
-// تشغيل السيرفر
 server.listen(PORT, () => {
     console.log(`🚀 [NINJA SERVER & DASHBOARD] السيرفر يعمل الآن على البورت ${PORT}`);
 });
