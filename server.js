@@ -12,90 +12,195 @@ const LOCK_DURATION = 4 * 60 * 1000; // 4 دقائق بالملي ثانية
 let currentMaxRequests = 0; // العدد الافتراضي للطلبات
 let timeRecords = {}; // كائن لتخزين الأوقات مفروزة بالدقيقة
 
-// ==========================================
-// 2. واجهة الداشبورد (HTML الأساسي)
-// ==========================================
-// بنيت لك هيكل HTML أساسي ومرتب لكي نرى المنطق، وبعدها سنعمل على ستايل احترافي كما اتفقنا
 const dashboardHTML = `
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <title>Ninja Dashboard 🥷</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ninja Command Center 🥷</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #111; color: #fff; padding: 20px; margin: 0; }
-        h1 { color: #ffeb3b; text-align: center; margin-bottom: 30px; border-bottom: 1px solid #333; padding-bottom: 10px; }
-        .card { background: #222; padding: 20px; margin-bottom: 20px; border-radius: 8px; border: 1px solid #444; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
-        .input-group { display: flex; align-items: center; gap: 10px; margin-top: 15px; }
-        input[type="number"] { padding: 10px; border-radius: 5px; border: 1px solid #555; background: #333; color: white; font-size: 16px; width: 100px; text-align: center; }
-        button { padding: 10px 20px; background: #2196f3; color: white; border: none; border-radius: 5px; font-size: 16px; cursor: pointer; font-weight: bold; transition: 0.2s; }
-        button:hover { background: #1976d2; }
-        .minute-group { margin-bottom: 20px; padding: 15px; background: #1a1a1a; border-radius: 8px; border-right: 4px solid #4caf50; }
-        .minute-title { font-weight: bold; color: #4caf50; margin-bottom: 10px; font-size: 1.3em; border-bottom: 1px dashed #444; padding-bottom: 5px;}
-        .time-item { padding: 8px; color: #ccc; font-family: monospace; font-size: 1.2em; background: #2a2a2a; margin-bottom: 5px; border-radius: 4px;}
-        .time-item.winner { color: #ff5722; font-weight: bold; background: #331a1a; border: 1px solid #ff5722; } /* تمييز التوقيت الأسرع */
+        :root {
+            --bg: #09090b;
+            --card-bg: #18181b;
+            --border: #27272a;
+            --primary: #3b82f6;
+            --success: #10b981;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+            --text-main: #f4f4f5;
+            --text-muted: #a1a1aa;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, sans-serif; }
+        
+        body { background-color: var(--bg); color: var(--text-main); padding: 20px; line-height: 1.6; }
+        
+        .container { max-width: 1200px; margin: 0 auto; }
+        
+        .header { text-align: center; margin-bottom: 40px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
+        .header h1 { font-size: 2.5rem; font-weight: 800; letter-spacing: 2px; text-shadow: 0 0 15px rgba(59, 130, 246, 0.5); }
+        .header p { color: var(--text-muted); font-size: 1.1rem; margin-top: 5px; }
+
+        .dashboard-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 24px; margin-bottom: 24px; }
+        
+        .card { 
+            background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; 
+            padding: 24px; position: relative; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            transition: transform 0.2s;
+        }
+        .card:hover { transform: translateY(-2px); }
+        .card::before { content: ''; position: absolute; top: 0; right: 0; width: 4px; height: 100%; }
+        
+        .card.ctrl::before { background: var(--primary); }
+        .card.status::before { background: var(--success); transition: background 0.3s; }
+        .card.status.locked::before { background: var(--danger); }
+        .card.records::before { background: var(--warning); width: 100%; height: 4px; top: 0; right: 0; }
+
+        .card h2 { font-size: 1.3rem; margin-bottom: 15px; display: flex; align-items: center; gap: 10px; color: var(--text-main); }
+        
+        /* Control Section */
+        .val-display { font-size: 2.5rem; font-weight: bold; color: var(--primary); text-shadow: 0 0 10px rgba(59, 130, 246, 0.3); margin: 10px 0; }
+        .input-group { display: flex; gap: 10px; margin-top: 15px; }
+        input[type="number"] { flex: 1; padding: 12px; border-radius: 8px; border: 1px solid var(--border); background: #000; color: #fff; font-size: 1.1rem; text-align: center; outline: none; transition: border 0.3s; }
+        input[type="number"]:focus { border-color: var(--primary); }
+        button { padding: 12px 24px; background: var(--primary); color: white; border: none; border-radius: 8px; font-size: 1rem; font-weight: bold; cursor: pointer; transition: 0.2s; box-shadow: 0 0 15px rgba(59, 130, 246, 0.4); }
+        button:hover { background: #2563eb; transform: scale(1.02); }
+
+        /* Status Section */
+        .status-indicator { display: flex; align-items: center; justify-content: center; flex-direction: column; height: 100%; padding: 20px 0; }
+        .pulse-ring { width: 60px; height: 60px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-bottom: 15px; position: relative; }
+        .pulse-ring::after { content: ''; position: absolute; width: 100%; height: 100%; border-radius: 50%; animation: pulse 2s infinite; }
+        
+        .status-open .pulse-ring { background: rgba(16, 185, 129, 0.2); }
+        .status-open .pulse-ring::after { border: 2px solid var(--success); }
+        .status-locked .pulse-ring { background: rgba(239, 68, 68, 0.2); }
+        .status-locked .pulse-ring::after { border: 2px solid var(--danger); animation-duration: 1s; }
+        
+        .status-text { font-size: 1.5rem; font-weight: bold; text-align: center; }
+        .status-open .status-text { color: var(--success); }
+        .status-locked .status-text { color: var(--danger); }
+
+        /* Records Section */
+        .minute-group { background: #000; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 20px; overflow: hidden; }
+        .minute-header { background: #1a1a24; padding: 12px 20px; font-weight: bold; font-size: 1.1rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; color: var(--primary); }
+        .records-list { padding: 15px; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+        
+        .time-item { background: var(--card-bg); border: 1px solid var(--border); padding: 10px 15px; border-radius: 6px; font-family: monospace; font-size: 1.1rem; text-align: center; color: var(--text-muted); transition: 0.3s; }
+        
+        /* The Winner Style */
+        .time-item.winner { 
+            background: rgba(245, 158, 11, 0.1); 
+            border: 1px solid var(--warning); 
+            color: var(--warning); 
+            font-size: 1.25rem; 
+            font-weight: bold; 
+            box-shadow: 0 0 15px rgba(245, 158, 11, 0.2);
+            grid-column: 1 / -1; /* يجعله يأخذ العرض كاملاً في الأعلى */
+            display: flex; justify-content: center; align-items: center; gap: 10px;
+        }
+        
+        @keyframes pulse { 0% { transform: scale(0.95); opacity: 1; } 100% { transform: scale(1.5); opacity: 0; } }
+        
+        .connection-status { position: fixed; bottom: 10px; left: 10px; font-size: 0.8rem; padding: 5px 10px; border-radius: 20px; background: rgba(0,0,0,0.8); border: 1px solid #333; }
+        .conn-online { color: var(--success); }
+        .conn-offline { color: var(--danger); }
     </style>
 </head>
 <body>
-    <h1>🥷 NINJA COMMAND CENTER 🥷</h1>
-    
-    <!-- قسم التحكم في عدد الطلبات -->
-    <div class="card">
-        <h2 style="margin-top:0;">⚙️ التحكم في عدد الطلبات (maxRequests)</h2>
-        <div style="font-size: 1.2em;">القيمة الحالية في المتصفحات: <span id="currentMax" style="color:#4caf50; font-weight:bold; font-size:1.5em;">0</span></div>
-        <div class="input-group">
-            <input type="number" id="maxInput" min="0" value="0">
-            <button onclick="saveMaxRequests()">تحديث وإرسال للكل</button>
+    <div class="container">
+        <div class="header">
+            <h1>🥷 NINJA COMMAND CENTER</h1>
+            <p>لوحة التحكم المركزية - مزامنة ورصد النيتوورك بسرعـة البرق</p>
+        </div>
+
+        <div class="dashboard-grid">
+            <!-- Control Card -->
+            <div class="card ctrl">
+                <h2>⚙️ تحكم الطلبات (maxRequests)</h2>
+                <div style="color: var(--text-muted); font-size: 0.9rem;">العدد الحالي المحفوظ في جميع المتصفحات المتصلة:</div>
+                <div class="val-display" id="currentMax">0</div>
+                <div class="input-group">
+                    <input type="number" id="maxInput" min="0" value="0" placeholder="أدخل العدد...">
+                    <button onclick="saveMaxRequests()">تطبيق فوراً 🚀</button>
+                </div>
+            </div>
+
+            <!-- Status Card -->
+            <div class="card status" id="statusCard">
+                <h2>📡 حالة الهجوم المركزية</h2>
+                <div class="status-indicator status-open" id="statusIndicator">
+                    <div class="pulse-ring"><span style="font-size: 24px;" id="statusIcon">🔓</span></div>
+                    <div class="status-text" id="lockStatus">مستعد لتلقي الإشارة</div>
+                    <div style="color: var(--text-muted); margin-top: 10px; font-size: 0.9rem;" id="lockSubtext">السيرفر مفتوح وينتظر كشاف 200 OK</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Records Card -->
+        <div class="card records">
+            <h2>⏱️ سجل "توقيت العويسي" (الفرز المباشر)</h2>
+            <div id="recordsContainer">
+                <div style="text-align: center; color: var(--text-muted); padding: 40px;">
+                    ⏳ لا توجد إشارات حتى الآن... السيرفر في وضع الاستماع.
+                </div>
+            </div>
         </div>
     </div>
 
-    <!-- قسم حالة السيرفر (قفل 4 دقائق) -->
-    <div class="card">
-        <h2 style="margin-top:0;">🔴 حالة الهجوم الموحد</h2>
-        <div id="lockStatus" style="font-size: 1.4em; font-weight: bold; color: #4caf50;">🔓 مستعد لتلقي الإشارة (السيرفر مفتوح)</div>
-    </div>
-
-    <!-- قسم توقيت العويسي -->
-    <div class="card">
-        <h2 style="margin-top:0;">⏱️ سجل "توقيت العويسي" (الرصد الشبكي 200 OK)</h2>
-        <p style="color: #888;">الأسرع في كل دقيقة يظهر في القمة باللون الأحمر</p>
-        <div id="recordsContainer">لا توجد إشارات حتى الآن...</div>
-    </div>
+    <div class="connection-status conn-offline" id="connStatus">⚫ جاري الاتصال...</div>
 
     <script>
-        // الاتصال التلقائي بنفس السيرفر (WebSocket)
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = protocol + '//' + window.location.host;
         let ws;
 
         function connect() {
             ws = new WebSocket(wsUrl);
+            
             ws.onopen = () => {
-                console.log('متصل بالسيرفر كـ لوحة تحكم');
+                document.getElementById('connStatus').className = 'connection-status conn-online';
+                document.getElementById('connStatus').innerHTML = '🟢 متصل بالسيرفر المركزي';
                 ws.send(JSON.stringify({ action: 'REGISTER_DASHBOARD' }));
             };
+            
             ws.onmessage = (e) => {
                 const data = JSON.parse(e.data);
                 if (data.action === 'DASHBOARD_SYNC') {
-                    // تحديث القيمة
+                    // Update Requests count
                     document.getElementById('currentMax').innerText = data.maxRequests;
-                    document.getElementById('maxInput').value = data.maxRequests;
                     
-                    // تحديث حالة القفل
-                    const lockEl = document.getElementById('lockStatus');
+                    // Update Lock Status UI
+                    const statusCard = document.getElementById('statusCard');
+                    const indicator = document.getElementById('statusIndicator');
+                    const text = document.getElementById('lockStatus');
+                    const icon = document.getElementById('statusIcon');
+                    const subtext = document.getElementById('lockSubtext');
+
                     if(data.isLocked) {
-                        lockEl.innerText = "🔒 السيرفر مقفل (في فترة الـ 4 دقائق تبريد)";
-                        lockEl.style.color = "#ff5722";
+                        statusCard.className = 'card status locked';
+                        indicator.className = 'status-indicator status-locked';
+                        icon.innerText = '🔒';
+                        text.innerText = 'السيرفر مقفل (قيد الهجوم)';
+                        subtext.innerText = 'يتم الآن تجاهل أي إشارات لمدة 4 دقائق...';
                     } else {
-                        lockEl.innerText = "🔓 مستعد لتلقي الإشارة (مفتوح)";
-                        lockEl.style.color = "#4caf50";
+                        statusCard.className = 'card status';
+                        indicator.className = 'status-indicator status-open';
+                        icon.innerText = '🔓';
+                        text.innerText = 'مستعد لتلقي الإشارة';
+                        subtext.innerText = 'السيرفر مفتوح وينتظر كشاف 200 OK';
                     }
 
-                    // رسم السجلات
+                    // Render Records
                     renderRecords(data.records);
                 }
             };
-            ws.onclose = () => setTimeout(connect, 2000);
+            
+            ws.onclose = () => {
+                document.getElementById('connStatus').className = 'connection-status conn-offline';
+                document.getElementById('connStatus').innerHTML = '🔴 تم فقدان الاتصال! جاري إعادة المحاولة...';
+                setTimeout(connect, 2000);
+            };
         }
 
         function saveMaxRequests() {
@@ -105,33 +210,38 @@ const dashboardHTML = `
 
         function renderRecords(records) {
             const container = document.getElementById('recordsContainer');
-            container.innerHTML = '';
-            
-            // جلب الدقائق وترتيبها لعرض الأحدث أولاً
             const minutes = Object.keys(records).sort().reverse(); 
             
-            if(minutes.length === 0) {
-                container.innerHTML = '<div style="color:#777;">لا توجد سجلات بعد...</div>';
-                return;
-            }
+            if(minutes.length === 0) return;
 
+            container.innerHTML = '';
+            
             minutes.forEach(minute => {
                 const groupDiv = document.createElement('div');
                 groupDiv.className = 'minute-group';
                 
-                const title = document.createElement('div');
-                title.className = 'minute-title';
-                title.innerText = 'الدقيقة: ' + minute;
-                groupDiv.appendChild(title);
+                const header = document.createElement('div');
+                header.className = 'minute-header';
+                header.innerHTML = \`<span>📅 الدقيقة: \${minute}</span> <span style="color:var(--text-muted); font-size:0.9rem;">الطلبات: \${records[minute].length}</span>\`;
+                groupDiv.appendChild(header);
 
-                // الأوقات تأتي مرتبة من السيرفر (الأسرع أولاً)
+                const listDiv = document.createElement('div');
+                listDiv.className = 'records-list';
+
                 records[minute].forEach((timeStr, index) => {
                     const timeEl = document.createElement('div');
-                    timeEl.className = 'time-item' + (index === 0 ? ' winner' : '');
-                    timeEl.innerText = (index === 0 ? '🏆 الأسرع: ' : '⏱️ ') + timeStr;
-                    groupDiv.appendChild(timeEl);
+                    // الفائز (أول عنصر بعد الفرز) يأخذ الستايل المميز
+                    if(index === 0) {
+                        timeEl.className = 'time-item winner';
+                        timeEl.innerHTML = \`🏆 الأسرع: \${timeStr}\`;
+                    } else {
+                        timeEl.className = 'time-item';
+                        timeEl.innerHTML = \`⏱️ \${timeStr}\`;
+                    }
+                    listDiv.appendChild(timeEl);
                 });
                 
+                groupDiv.appendChild(listDiv);
                 container.appendChild(groupDiv);
             });
         }
