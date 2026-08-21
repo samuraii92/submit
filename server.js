@@ -3,10 +3,19 @@ const WebSocket = require('ws');
 
 const PORT = process.env.PORT || 8080;
 
+// === متغيرات التحكم المركزي ===
+let currentMaxRequests = 0; 
 let isLocked = false;
 const LOCK_DURATION = 4 * 60 * 1000; 
-let currentMaxRequests = 0; 
 let timeRecords = {}; 
+
+// المتغيرات الجديدة للعداد والإرسال التلقائي
+let masterConfig = {
+    targetSec: 0,
+    targetMs: 0,
+    isArmed: false,        // هل العداد شغال؟
+    autoSubmit: false      // هل يضرب فور الدخول للصفحة؟
+};
 
 const dashboardHTML = `
 <!DOCTYPE html>
@@ -25,17 +34,26 @@ const dashboardHTML = `
         .dashboard-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 24px; margin-bottom: 24px; }
         .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 24px; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
         .card.ctrl::before { content: ''; position: absolute; top: 0; right: 0; width: 4px; height: 100%; background: var(--primary); }
-        .card.status::before { content: ''; position: absolute; top: 0; right: 0; width: 4px; height: 100%; background: var(--success); }
-        .card.status.locked::before { background: var(--danger); }
-        .val-display { font-size: 2.5rem; font-weight: bold; color: var(--primary); margin: 10px 0; }
-        .input-group { display: flex; gap: 10px; margin-top: 15px; }
-        input[type="number"] { flex: 1; padding: 12px; border-radius: 8px; border: 1px solid var(--border); background: #000; color: #fff; text-align: center; font-size: 1.1rem; }
-        button { padding: 12px 24px; background: var(--primary); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
-        .minute-group { background: #000; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 20px; }
-        .minute-header { background: #1a1a24; padding: 12px 20px; font-weight: bold; color: var(--primary); border-bottom: 1px solid var(--border); }
-        .records-list { padding: 15px; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
-        .time-item { background: var(--card-bg); border: 1px solid var(--border); padding: 10px; border-radius: 6px; text-align: center; font-family: monospace; }
-        .time-item.winner { background: rgba(245, 158, 11, 0.1); border-color: var(--warning); color: var(--warning); font-weight: bold; grid-column: 1 / -1; }
+        .card.timer::before { content: ''; position: absolute; top: 0; right: 0; width: 4px; height: 100%; background: var(--warning); }
+        .input-group { display: flex; gap: 10px; margin-top: 15px; align-items: center; }
+        input[type="number"] { flex: 1; padding: 12px; border-radius: 8px; border: 1px solid var(--border); background: #000; color: #fff; text-align: center; font-size: 1.2rem; font-weight: bold; }
+        button { padding: 12px 24px; background: var(--primary); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; transition: 0.3s; }
+        button:hover { opacity: 0.8; }
+        .btn-start { background: var(--success); width: 100%; margin-top: 15px; font-size: 1.2rem; }
+        .btn-stop { background: var(--danger); width: 100%; margin-top: 15px; font-size: 1.2rem; display: none; }
+        
+        .switch-container { display: flex; align-items: center; justify-content: space-between; background: #000; padding: 15px; border-radius: 8px; border: 1px solid var(--border); margin-top: 15px; }
+        .switch { position: relative; display: inline-block; width: 60px; height: 34px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #333; transition: .4s; border-radius: 34px; }
+        .slider:before { position: absolute; content: ""; height: 26px; width: 26px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: var(--danger); box-shadow: 0 0 15px rgba(239, 68, 68, 0.5); }
+        input:checked + .slider:before { transform: translateX(26px); }
+        
+        .status-badge { display: inline-block; padding: 5px 15px; border-radius: 20px; font-size: 0.9rem; font-weight: bold; margin-bottom: 15px; }
+        .status-armed { background: rgba(16, 185, 129, 0.2); color: var(--success); border: 1px solid var(--success); }
+        .status-disarmed { background: rgba(161, 161, 170, 0.2); color: var(--text-muted); border: 1px solid var(--text-muted); }
+        
         .connection-status { position: fixed; bottom: 10px; left: 10px; font-size: 0.8rem; padding: 5px 10px; border-radius: 20px; background: rgba(0,0,0,0.8); border: 1px solid #333; }
         .conn-online { color: var(--success); }
         .conn-offline { color: var(--danger); }
@@ -45,79 +63,112 @@ const dashboardHTML = `
     <div class="container">
         <div class="header"><h1>🥷 NINJA COMMAND CENTER</h1></div>
         <div class="dashboard-grid">
-            <div class="card ctrl">
-                <h2>⚙️ تحكم الطلبات (maxRequests)</h2>
-                <div class="val-display" id="currentMax">0</div>
+            
+            <!-- لوحة التوقيت والمزامنة -->
+            <div class="card timer">
+                <h2>⏰ نظام التوقيت المركزي</h2>
+                <div id="armStatus" class="status-badge status-disarmed">العداد متوقف ⏸️</div>
+                
                 <div class="input-group">
-                    <input type="number" id="maxInput" min="0" value="0">
-                    <button onclick="saveMaxRequests()">تطبيق فوراً 🚀</button>
+                    <div>
+                        <label>الثواني (Sec)</label>
+                        <input type="number" id="secInput" min="0" max="59" value="0">
+                    </div>
+                    <div>
+                        <label>الميلي (Ms)</label>
+                        <input type="number" id="msInput" min="0" max="999" value="0">
+                    </div>
+                </div>
+                <button id="btnStart" class="btn-start" onclick="toggleTimer(true)">تشغيل العداد للجميع ▶️</button>
+                <button id="btnStop" class="btn-stop" onclick="toggleTimer(false)">إيقاف العداد 🛑</button>
+
+                <div class="switch-container">
+                    <div>
+                        <strong style="color: var(--danger);">🔥 هجوم فوري عند الدخول</strong>
+                        <div style="font-size: 0.8rem; color: #888;">(يضرب فور فتح الصفحة وتخطي الكابتشا)</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="autoSubmitCheck" onchange="updateAutoSubmit()">
+                        <span class="slider"></span>
+                    </label>
                 </div>
             </div>
-            <div class="card status" id="statusCard">
-                <h2>📡 حالة الهجوم المركزية</h2>
-                <div style="font-size: 1.5rem; font-weight: bold; text-align: center; margin-top:20px;" id="lockStatus">مستعد لتلقي الإشارة 🔓</div>
+
+            <!-- تحكم الطلبات الأصلي -->
+            <div class="card ctrl">
+                <h2>⚙️ تحكم الطلبات</h2>
+                <div style="font-size: 2.5rem; font-weight: bold; color: var(--primary); margin: 10px 0;" id="currentMax">0</div>
+                <div class="input-group">
+                    <input type="number" id="maxInput" min="0" value="0">
+                    <button onclick="saveMaxRequests()">تطبيق 🚀</button>
+                </div>
             </div>
-        </div>
-        <div class="card records">
-            <h2>⏱️ سجل "توقيت العويسي"</h2>
-            <div id="recordsContainer"><div style="text-align: center; color: #888; padding: 40px;">⏳ في وضع الاستماع...</div></div>
+
         </div>
     </div>
+    
     <div class="connection-status conn-offline" id="connStatus">⚫ جاري الاتصال...</div>
 
     <script>
         const wsUrl = (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host;
         let ws;
+        
         function connect() {
             ws = new WebSocket(wsUrl);
             ws.onopen = () => {
                 document.getElementById('connStatus').className = 'connection-status conn-online';
-                document.getElementById('connStatus').innerHTML = '🟢 متصل بالسيرفر المركزي';
+                document.getElementById('connStatus').innerHTML = '🟢 متصل بالسيرفر';
                 ws.send(JSON.stringify({ action: 'REGISTER_DASHBOARD' }));
             };
             ws.onmessage = (e) => {
                 const data = JSON.parse(e.data);
                 if (data.action === 'DASHBOARD_SYNC') {
                     document.getElementById('currentMax').innerText = data.maxRequests;
-                    const statusCard = document.getElementById('statusCard');
-                    const text = document.getElementById('lockStatus');
-                    if(data.isLocked) {
-                        statusCard.classList.add('locked');
-                        text.innerText = 'السيرفر مقفل (قيد الهجوم) 🔒';
-                        text.style.color = '#ef4444';
+                    
+                    // تحديث واجهة العداد
+                    document.getElementById('secInput').value = data.config.targetSec;
+                    document.getElementById('msInput').value = data.config.targetMs;
+                    document.getElementById('autoSubmitCheck').checked = data.config.autoSubmit;
+                    
+                    const armBadge = document.getElementById('armStatus');
+                    if (data.config.isArmed) {
+                        armBadge.className = 'status-badge status-armed';
+                        armBadge.innerHTML = 'العداد شغال ويتربص 🎯';
+                        document.getElementById('btnStart').style.display = 'none';
+                        document.getElementById('btnStop').style.display = 'block';
                     } else {
-                        statusCard.classList.remove('locked');
-                        text.innerText = 'مستعد لتلقي الإشارة 🔓';
-                        text.style.color = '#10b981';
+                        armBadge.className = 'status-badge status-disarmed';
+                        armBadge.innerHTML = 'العداد متوقف ⏸️';
+                        document.getElementById('btnStart').style.display = 'block';
+                        document.getElementById('btnStop').style.display = 'none';
                     }
-                    renderRecords(data.records);
                 }
             };
             ws.onclose = () => {
                 document.getElementById('connStatus').className = 'connection-status conn-offline';
-                document.getElementById('connStatus').innerHTML = '🔴 تم فقدان الاتصال...';
+                document.getElementById('connStatus').innerHTML = '🔴 انقطع الاتصال...';
                 setTimeout(connect, 2000);
             };
         }
-        function saveMaxRequests() { ws.send(JSON.stringify({ action: 'SET_MAX_REQUESTS', value: document.getElementById('maxInput').value })); }
-        function renderRecords(records) {
-            const container = document.getElementById('recordsContainer');
-            const minutes = Object.keys(records).sort().reverse(); 
-            if(minutes.length === 0) return;
-            container.innerHTML = '';
-            minutes.forEach(minute => {
-                const groupDiv = document.createElement('div'); groupDiv.className = 'minute-group';
-                groupDiv.innerHTML = \`<div class="minute-header">📅 الدقيقة: \${minute}</div>\`;
-                const listDiv = document.createElement('div'); listDiv.className = 'records-list';
-                records[minute].forEach((timeStr, index) => {
-                    const timeEl = document.createElement('div');
-                    timeEl.className = index === 0 ? 'time-item winner' : 'time-item';
-                    timeEl.innerHTML = index === 0 ? \`🏆 الأسرع: \${timeStr}\` : \`⏱️ \${timeStr}\`;
-                    listDiv.appendChild(timeEl);
-                });
-                groupDiv.appendChild(listDiv); container.appendChild(groupDiv);
-            });
+
+        function saveMaxRequests() { 
+            ws.send(JSON.stringify({ action: 'SET_MAX_REQUESTS', value: document.getElementById('maxInput').value })); 
         }
+
+        function toggleTimer(arm) {
+            const sec = parseInt(document.getElementById('secInput').value) || 0;
+            const ms = parseInt(document.getElementById('msInput').value) || 0;
+            ws.send(JSON.stringify({ action: 'UPDATE_MASTER_CONFIG', sec: sec, ms: ms, isArmed: arm, autoSubmit: document.getElementById('autoSubmitCheck').checked }));
+        }
+
+        function updateAutoSubmit() {
+            const sec = parseInt(document.getElementById('secInput').value) || 0;
+            const ms = parseInt(document.getElementById('msInput').value) || 0;
+            const isArmed = document.getElementById('btnStop').style.display === 'block'; // حالة العداد الحالية
+            const autoSubmit = document.getElementById('autoSubmitCheck').checked;
+            ws.send(JSON.stringify({ action: 'UPDATE_MASTER_CONFIG', sec: sec, ms: ms, isArmed: isArmed, autoSubmit: autoSubmit }));
+        }
+
         connect();
     </script>
 </body>
@@ -127,60 +178,26 @@ const dashboardHTML = `
 const wss = new WebSocket.Server({ noServer: true });
 
 function updateDashboards() {
-    const payload = JSON.stringify({ action: 'DASHBOARD_SYNC', maxRequests: currentMaxRequests, records: timeRecords, isLocked: isLocked });
+    const payload = JSON.stringify({ 
+        action: 'DASHBOARD_SYNC', 
+        maxRequests: currentMaxRequests, 
+        isLocked: isLocked,
+        config: masterConfig 
+    });
     wss.clients.forEach(client => { if (client.readyState === WebSocket.OPEN && client.isDashboard) client.send(payload); });
 }
 
-// 🚀 الدالة المسؤولة عن إطلاق الهجوم
-function triggerMassiveAttack(exactTime) {
-    const minuteKey = exactTime.substring(0, 5);
-    if (!timeRecords[minuteKey]) timeRecords[minuteKey] = [];
-    if (!timeRecords[minuteKey].includes(exactTime)) {
-        timeRecords[minuteKey].push(exactTime);
-        timeRecords[minuteKey].sort(); 
-    }
-    updateDashboards(); 
-
-    if (isLocked) return; 
-
-    isLocked = true;
-    console.log(`⚡ [هجوم] إشارة 200 OK وصلت بتوقيت ${exactTime}! إطلاق الهجوم الموحد...`);
-
-    wss.clients.forEach((client) => {
+// دالة بث الإعدادات للمتصفحات (العملاء)
+function broadcastConfigToClients() {
+    const payload = JSON.stringify({ action: 'SYNC_TIMER_CONFIG', config: masterConfig });
+    wss.clients.forEach(client => {
         if (client.readyState === WebSocket.OPEN && !client.isDashboard) {
-            client.send(JSON.stringify({ action: 'EXECUTE_MASSIVE_SUBMIT' }));
+            client.send(payload);
         }
     });
-
-    updateDashboards(); 
-    setTimeout(() => { isLocked = false; updateDashboards(); }, LOCK_DURATION);
 }
 
 const server = http.createServer((req, res) => {
-    // 🔥 إضافة مسار API لاستقبال الإشارة من الباكراوند فوراً بدون انتظار WebSocket
-    if (req.method === 'POST' && req.url === '/api/signal') {
-        let body = '';
-        req.on('data', chunk => { body += chunk.toString(); });
-        req.on('end', () => {
-            try {
-                const data = JSON.parse(body);
-                triggerMassiveAttack(data.time || "00:00:00.000");
-                res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-                res.end(JSON.stringify({ success: true }));
-            } catch (e) {
-                res.writeHead(400); res.end();
-            }
-        });
-        return;
-    }
-
-    // واجهة الداشبورد و API كونفيج
-    if (req.url === '/api/config') {
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-        res.end(JSON.stringify({ maxRequests: currentMaxRequests }));
-        return;
-    }
-
     if (req.url === '/') {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(dashboardHTML);
@@ -197,29 +214,32 @@ wss.on('connection', (ws) => {
     ws.isAlive = true;
     ws.on('pong', () => { ws.isAlive = true; });
 
+    // إرسال الإعدادات فوراً لأي متصفح جديد يتصل
+    ws.send(JSON.stringify({ action: 'SYNC_TIMER_CONFIG', config: masterConfig }));
+
     ws.on('message', (message) => {
         try {
             const data = JSON.parse(message);
 
-            if (data.action === 'SYNC_ME_PLEASE') {
-                ws.send(JSON.stringify({ action: 'UPDATE_MAX_REQUESTS', value: currentMaxRequests }));
-                return;
-            }
             if (data.action === 'REGISTER_DASHBOARD') {
-                ws.isDashboard = true; updateDashboards(); return;
+                ws.isDashboard = true; 
+                updateDashboards(); 
+                return;
             }
             if (data.action === 'SET_MAX_REQUESTS') {
                 currentMaxRequests = parseInt(data.value, 10);
-                wss.clients.forEach(client => {
-                    if (client.readyState === WebSocket.OPEN && !client.isDashboard) {
-                        client.send(JSON.stringify({ action: 'UPDATE_MAX_REQUESTS', value: currentMaxRequests }));
-                    }
-                });
                 updateDashboards();
                 return;
             }
-            if (data.action === 'SLOT_200_OK_FOUND') {
-                triggerMassiveAttack(data.time);
+            if (data.action === 'UPDATE_MASTER_CONFIG') {
+                masterConfig.targetSec = data.sec;
+                masterConfig.targetMs = data.ms;
+                masterConfig.isArmed = data.isArmed;
+                masterConfig.autoSubmit = data.autoSubmit;
+                
+                broadcastConfigToClients(); // بث للمتصفحات فوراً
+                updateDashboards();         // تحديث الداشبورد
+                return;
             }
         } catch (e) {}
     });
