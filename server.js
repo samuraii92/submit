@@ -42,6 +42,9 @@ const dashboardHTML = `
         .status-armed { background: rgba(16, 185, 129, 0.2); color: var(--success); border: 1px solid var(--success); }
         .status-disarmed { background: rgba(161, 161, 170, 0.2); color: #a1a1aa; border: 1px solid #a1a1aa; }
         .section-title { margin-bottom: 20px; border-bottom: 1px solid #333; padding-bottom: 10px; color: var(--primary); }
+        
+        .log-box { margin-top: 20px; background: #000; padding: 15px; border-radius: 8px; border: 1px solid var(--success); }
+        .log-content { max-height: 150px; overflow-y: auto; font-family: monospace; font-size: 14px; }
     </style>
 </head>
 <body>
@@ -59,14 +62,23 @@ const dashboardHTML = `
                     <div><label>الميلي</label><input type="number" id="m_ms" value="0"></div>
                 </div>
                 
+                <!-- تم التعديل هنا: إضافة onchange للزر ليطبق فوراً على الكل -->
                 <div class="switch-container">
                     <span>🚀 تفعيل الطلب الأول للكل</span>
-                    <label class="switch"><input type="checkbox" id="m_firstReq"><span class="slider"></span></label>
+                    <label class="switch"><input type="checkbox" id="m_firstReq" onchange="updateMasterFirstReq()"><span class="slider"></span></label>
                 </div>
 
                 <div class="input-group">
                     <button class="btn-start" onclick="masterAction(true)">تشغيل الكل ▶️</button>
                     <button class="btn-stop" onclick="masterAction(false)">إيقاف الكل 🛑</button>
+                </div>
+
+                <!-- 🚀 المربع الجديد لعرض أوقات الدخول (200 OK) -->
+                <div class="log-box">
+                    <h4 style="color: var(--success); margin-bottom: 10px;">⏱️ سجل الدخول الناجح (200 OK)</h4>
+                    <div id="log200" class="log-content">
+                        <span style="color:#555;">في وضع الاستماع لعمليات الدخول...</span>
+                    </div>
                 </div>
             </div>
         </div>
@@ -80,22 +92,27 @@ const dashboardHTML = `
     <script>
         const wsUrl = (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host;
         let ws;
-        let localClientsState = {};
         
         function connect() {
             ws = new WebSocket(wsUrl);
             ws.onopen = () => ws.send(JSON.stringify({ action: 'REGISTER_DASHBOARD' }));
             ws.onmessage = (e) => {
                 const data = JSON.parse(e.data);
+                
                 if (data.action === 'DASHBOARD_SYNC') {
                     renderDashboard(data);
+                }
+                // استقبال وعرض وقت الدخول 200 OK
+                else if (data.action === 'SLOT_200_OK_FOUND') {
+                    const logBox = document.getElementById('log200');
+                    if(logBox.innerHTML.includes("في وضع الاستماع")) logBox.innerHTML = "";
+                    logBox.innerHTML = \`<div style="margin-bottom: 5px; padding: 5px; border-bottom: 1px solid #333;">✅ دخلت صفحة بنجاح: <b style="color: var(--success); font-size: 16px;">\${data.time}</b></div>\` + logBox.innerHTML;
                 }
             };
             ws.onclose = () => setTimeout(connect, 2000);
         }
 
         function renderDashboard(data) {
-            // تحديث واجهة الماستر
             document.getElementById('m_sec').value = data.master.targetSec;
             document.getElementById('m_ms').value = data.master.targetMs;
             document.getElementById('m_firstReq').checked = data.master.enableFirstRequest;
@@ -104,7 +121,6 @@ const dashboardHTML = `
             mBadge.className = data.master.isArmed ? 'status-badge status-armed' : 'status-badge status-disarmed';
             mBadge.innerHTML = data.master.isArmed ? 'الكل يعمل 🎯' : 'الكل متوقف ⏸️';
 
-            // بناء كروت الصفحات الفردية المتصلة
             const container = document.getElementById('clientsContainer');
             if(data.clients.length === 0) {
                 container.innerHTML = '<p style="color:#888;">لا توجد صفحات متصلة حالياً.</p>';
@@ -139,12 +155,18 @@ const dashboardHTML = `
             container.innerHTML = html;
         }
 
-        // إرسال أوامر الماستر (التحكم بالكل)
+        // إرسال أوامر الماستر (التحكم بالكل للعداد)
         function masterAction(isArmed) {
             const sec = parseInt(document.getElementById('m_sec').value) || 0;
             const ms = parseInt(document.getElementById('m_ms').value) || 0;
             const firstReq = document.getElementById('m_firstReq').checked;
             ws.send(JSON.stringify({ action: 'UPDATE_MASTER', config: { targetSec: sec, targetMs: ms, isArmed, enableFirstRequest: firstReq } }));
+        }
+
+        // إرسال أمر فوري لتفعيل الطلب الأول للكل
+        function updateMasterFirstReq() {
+            const firstReq = document.getElementById('m_firstReq').checked;
+            ws.send(JSON.stringify({ action: 'UPDATE_MASTER_FIRST_REQ', enableFirstRequest: firstReq }));
         }
 
         // إرسال أمر لصفحة محددة فقط
@@ -192,7 +214,6 @@ wss.on('connection', (ws) => {
         try {
             const data = JSON.parse(message);
             
-            // تسجيل الداشبورد
             if (data.action === 'REGISTER_DASHBOARD') { 
                 ws.isDashboard = true; 
                 broadcastDashboards(); 
@@ -204,7 +225,7 @@ wss.on('connection', (ws) => {
                 ws.isDashboard = false;
                 ws.tabId = data.tabId;
                 if (!connectedClients[data.tabId]) {
-                    // الصفحة الجديدة تأخذ إعدادات الماستر الافتراضية
+                    // 🔥 الصفحة الجديدة تأخذ إعدادات الماستر الافتراضية فوراً
                     connectedClients[data.tabId] = { id: data.tabId, config: { ...masterConfig } };
                 }
                 ws.send(JSON.stringify({ action: 'SYNC_TIMER_CONFIG', config: connectedClients[data.tabId].config }));
@@ -212,10 +233,9 @@ wss.on('connection', (ws) => {
                 return;
             }
 
-            // تحديث الشامل (يُجبر كل الصفحات على هذا التحديث)
+            // تحديث الشامل للعدادات
             if (data.action === 'UPDATE_MASTER') {
                 masterConfig = data.config;
-                // تحديث بيانات كل العملاء وتوجيه الأمر لهم
                 wss.clients.forEach(c => {
                     if (!c.isDashboard && c.tabId) {
                         connectedClients[c.tabId].config = { ...masterConfig };
@@ -225,11 +245,22 @@ wss.on('connection', (ws) => {
                 broadcastDashboards(); 
             }
 
+            // 🔥 تحديث الشامل للطلب الأول فوراً عند تغيير الزر
+            if (data.action === 'UPDATE_MASTER_FIRST_REQ') {
+                masterConfig.enableFirstRequest = data.enableFirstRequest;
+                wss.clients.forEach(c => {
+                    if (!c.isDashboard && c.tabId && connectedClients[c.tabId]) {
+                        connectedClients[c.tabId].config.enableFirstRequest = data.enableFirstRequest;
+                        c.send(JSON.stringify({ action: 'SYNC_TIMER_CONFIG', config: connectedClients[c.tabId].config }));
+                    }
+                });
+                broadcastDashboards();
+            }
+
             // تحديث صفحة واحدة فقط
             if (data.action === 'UPDATE_CLIENT') {
                 if (connectedClients[data.tabId]) {
                     connectedClients[data.tabId].config = data.config;
-                    // توجيه التحديث لهذه الصفحة بعينها فقط
                     wss.clients.forEach(c => {
                         if (!c.isDashboard && c.tabId === data.tabId) {
                             c.send(JSON.stringify({ action: 'SYNC_TIMER_CONFIG', config: data.config }));
@@ -239,9 +270,13 @@ wss.on('connection', (ws) => {
                 }
             }
 
-            // إرسال توقيت دخول الصفحة (اللوجيك الإضافي)
+            // 🔥 استقبال التوقيت من الباكراوند وعرضه في الداشبورد
             if (data.action === 'SLOT_200_OK_FOUND') {
-                wss.clients.forEach(c => { if (c.isDashboard) c.send(JSON.stringify(data)); });
+                wss.clients.forEach(c => { 
+                    if (c.isDashboard && c.readyState === WebSocket.OPEN) {
+                        c.send(JSON.stringify(data)); 
+                    } 
+                });
             }
 
         } catch (e) {}
