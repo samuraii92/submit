@@ -62,7 +62,6 @@ const dashboardHTML = `
                     <div><label>الميلي</label><input type="number" id="m_ms" value="0"></div>
                 </div>
                 
-                <!-- تم التعديل هنا: إضافة onchange للزر ليطبق فوراً على الكل -->
                 <div class="switch-container">
                     <span>🚀 تفعيل الطلب الأول للكل</span>
                     <label class="switch"><input type="checkbox" id="m_firstReq" onchange="updateMasterFirstReq()"><span class="slider"></span></label>
@@ -73,7 +72,6 @@ const dashboardHTML = `
                     <button class="btn-stop" onclick="masterAction(false)">إيقاف الكل 🛑</button>
                 </div>
 
-                <!-- 🚀 المربع الجديد لعرض أوقات الدخول (200 OK) -->
                 <div class="log-box">
                     <h4 style="color: var(--success); margin-bottom: 10px;">⏱️ سجل الدخول الناجح (200 OK)</h4>
                     <div id="log200" class="log-content">
@@ -100,9 +98,8 @@ const dashboardHTML = `
                 const data = JSON.parse(e.data);
                 
                 if (data.action === 'DASHBOARD_SYNC') {
-                    renderDashboard(data);
+                    renderDashboardSmartly(data);
                 }
-                // استقبال وعرض وقت الدخول 200 OK
                 else if (data.action === 'SLOT_200_OK_FOUND') {
                     const logBox = document.getElementById('log200');
                     if(logBox.innerHTML.includes("في وضع الاستماع")) logBox.innerHTML = "";
@@ -112,9 +109,14 @@ const dashboardHTML = `
             ws.onclose = () => setTimeout(connect, 2000);
         }
 
-        function renderDashboard(data) {
-            document.getElementById('m_sec').value = data.master.targetSec;
-            document.getElementById('m_ms').value = data.master.targetMs;
+        // 🔥 التحديث الذكي للصفحة للحفاظ على أرقامك
+        function renderDashboardSmartly(data) {
+            // تحديث قيم الماستر (فقط إذا لم يكن الماوس داخل المربع يكتب)
+            const mSec = document.getElementById('m_sec');
+            const mMs = document.getElementById('m_ms');
+            if (document.activeElement !== mSec) mSec.value = data.master.targetSec;
+            if (document.activeElement !== mMs) mMs.value = data.master.targetMs;
+            
             document.getElementById('m_firstReq').checked = data.master.enableFirstRequest;
             
             const mBadge = document.getElementById('masterStatus');
@@ -126,36 +128,74 @@ const dashboardHTML = `
                 container.innerHTML = '<p style="color:#888;">لا توجد صفحات متصلة حالياً.</p>';
                 return;
             }
-            
-            let html = '';
+
+            if (container.innerHTML.includes('لا توجد صفحات')) {
+                container.innerHTML = '';
+            }
+
+            // 1. مسح الكروت التي لم تعد متصلة
+            const incomingIds = data.clients.map(c => 'client_' + c.id);
+            Array.from(container.children).forEach(child => {
+                if (child.id && !incomingIds.includes(child.id)) {
+                    child.remove();
+                }
+            });
+
+            // 2. تحديث الكروت الذكي
             data.clients.forEach(c => {
                 const conf = c.config;
-                html += \`
-                <div class="card client">
-                    <h3>صفحة: \${c.id.substring(4)}</h3>
-                    <div class="status-badge \${conf.isArmed ? 'status-armed' : 'status-disarmed'}">
-                        \${conf.isArmed ? 'شغال 🎯' : 'متوقف ⏸️'}
-                    </div>
-                    <div class="input-group">
-                        <input type="number" id="sec_\${c.id}" value="\${conf.targetSec}">
-                        <input type="number" id="ms_\${c.id}" value="\${conf.targetMs}">
-                    </div>
-                    <div class="switch-container">
-                        <span>الطلب الأول</span>
-                        <label class="switch">
-                            <input type="checkbox" id="first_\${c.id}" \${conf.enableFirstRequest ? 'checked' : ''} onchange="clientAction('\${c.id}', \${conf.isArmed})">
-                            <span class="slider"></span>
-                        </label>
-                    </div>
-                    \${conf.isArmed 
-                        ? \`<button class="btn-stop" onclick="clientAction('\${c.id}', false)">إيقاف 🛑</button>\` 
-                        : \`<button class="btn-start" onclick="clientAction('\${c.id}', true)">تشغيل ▶️</button>\`}
-                </div>\`;
+                let card = document.getElementById('client_' + c.id);
+
+                // إذا كانت الصفحة جديدة تماماً ننشئ لها كارت
+                if (!card) {
+                    card = document.createElement('div');
+                    card.className = 'card client';
+                    card.id = 'client_' + c.id;
+                    card.innerHTML = \`
+                        <h3>صفحة: \${c.id.substring(4)}</h3>
+                        <div id="badge_\${c.id}" class="status-badge \${conf.isArmed ? 'status-armed' : 'status-disarmed'}">
+                            \${conf.isArmed ? 'شغال 🎯' : 'متوقف ⏸️'}
+                        </div>
+                        <div class="input-group">
+                            <input type="number" id="sec_\${c.id}" value="\${conf.targetSec}">
+                            <input type="number" id="ms_\${c.id}" value="\${conf.targetMs}">
+                        </div>
+                        <div class="switch-container">
+                            <span>الطلب الأول</span>
+                            <label class="switch">
+                                <input type="checkbox" id="first_\${c.id}" \${conf.enableFirstRequest ? 'checked' : ''} onchange="clientAction('\${c.id}', null)">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <button id="btn_\${c.id}" class="\${conf.isArmed ? 'btn-stop' : 'btn-start'}" onclick="clientAction('\${c.id}', \${!conf.isArmed})">
+                            \${conf.isArmed ? 'إيقاف 🛑' : 'تشغيل ▶️'}
+                        </button>
+                    \`;
+                    container.appendChild(card);
+                } 
+                // إذا كان الكارت موجوداً، نقوم بتحديث أجزائه فقط لتفادي تصفير العداد
+                else {
+                    const badge = document.getElementById('badge_' + c.id);
+                    badge.className = 'status-badge ' + (conf.isArmed ? 'status-armed' : 'status-disarmed');
+                    badge.innerHTML = conf.isArmed ? 'شغال 🎯' : 'متوقف ⏸️';
+
+                    const secInput = document.getElementById('sec_' + c.id);
+                    const msInput = document.getElementById('ms_' + c.id);
+                    
+                    // 🔥 السر هنا: لا تقم بتحديث المربع إذا كنت تكتب فيه الآن!
+                    if (document.activeElement !== secInput) secInput.value = conf.targetSec;
+                    if (document.activeElement !== msInput) msInput.value = conf.targetMs;
+
+                    document.getElementById('first_' + c.id).checked = conf.enableFirstRequest;
+
+                    const btn = document.getElementById('btn_' + c.id);
+                    btn.className = conf.isArmed ? 'btn-stop' : 'btn-start';
+                    btn.innerHTML = conf.isArmed ? 'إيقاف 🛑' : 'تشغيل ▶️';
+                    btn.onclick = () => clientAction(c.id, !conf.isArmed);
+                }
             });
-            container.innerHTML = html;
         }
 
-        // إرسال أوامر الماستر (التحكم بالكل للعداد)
         function masterAction(isArmed) {
             const sec = parseInt(document.getElementById('m_sec').value) || 0;
             const ms = parseInt(document.getElementById('m_ms').value) || 0;
@@ -163,18 +203,23 @@ const dashboardHTML = `
             ws.send(JSON.stringify({ action: 'UPDATE_MASTER', config: { targetSec: sec, targetMs: ms, isArmed, enableFirstRequest: firstReq } }));
         }
 
-        // إرسال أمر فوري لتفعيل الطلب الأول للكل
         function updateMasterFirstReq() {
             const firstReq = document.getElementById('m_firstReq').checked;
             ws.send(JSON.stringify({ action: 'UPDATE_MASTER_FIRST_REQ', enableFirstRequest: firstReq }));
         }
 
-        // إرسال أمر لصفحة محددة فقط
-        function clientAction(id, isArmed) {
+        function clientAction(id, isArmedArg) {
             const sec = parseInt(document.getElementById('sec_' + id).value) || 0;
             const ms = parseInt(document.getElementById('ms_' + id).value) || 0;
             const firstReq = document.getElementById('first_' + id).checked;
-            ws.send(JSON.stringify({ action: 'UPDATE_CLIENT', tabId: id, config: { targetSec: sec, targetMs: ms, isArmed, enableFirstRequest: firstReq } }));
+            
+            // إذا كان التغيير قادم من زر "الطلب الأول"، نحافظ على حالة التشغيل كما هي
+            let finalArmed = isArmedArg;
+            if (isArmedArg === null) {
+                finalArmed = document.getElementById('btn_' + id).className.includes('stop');
+            }
+
+            ws.send(JSON.stringify({ action: 'UPDATE_CLIENT', tabId: id, config: { targetSec: sec, targetMs: ms, isArmed: finalArmed, enableFirstRequest: firstReq } }));
         }
 
         connect();
@@ -220,12 +265,10 @@ wss.on('connection', (ws) => {
                 return; 
             }
             
-            // تسجيل صفحة عميل جديدة
             if (data.action === 'REGISTER_CLIENT') {
                 ws.isDashboard = false;
                 ws.tabId = data.tabId;
                 if (!connectedClients[data.tabId]) {
-                    // 🔥 الصفحة الجديدة تأخذ إعدادات الماستر الافتراضية فوراً
                     connectedClients[data.tabId] = { id: data.tabId, config: { ...masterConfig } };
                 }
                 ws.send(JSON.stringify({ action: 'SYNC_TIMER_CONFIG', config: connectedClients[data.tabId].config }));
@@ -233,7 +276,6 @@ wss.on('connection', (ws) => {
                 return;
             }
 
-            // تحديث الشامل للعدادات
             if (data.action === 'UPDATE_MASTER') {
                 masterConfig = data.config;
                 wss.clients.forEach(c => {
@@ -245,7 +287,6 @@ wss.on('connection', (ws) => {
                 broadcastDashboards(); 
             }
 
-            // 🔥 تحديث الشامل للطلب الأول فوراً عند تغيير الزر
             if (data.action === 'UPDATE_MASTER_FIRST_REQ') {
                 masterConfig.enableFirstRequest = data.enableFirstRequest;
                 wss.clients.forEach(c => {
@@ -257,7 +298,6 @@ wss.on('connection', (ws) => {
                 broadcastDashboards();
             }
 
-            // تحديث صفحة واحدة فقط
             if (data.action === 'UPDATE_CLIENT') {
                 if (connectedClients[data.tabId]) {
                     connectedClients[data.tabId].config = data.config;
@@ -270,7 +310,6 @@ wss.on('connection', (ws) => {
                 }
             }
 
-            // 🔥 استقبال التوقيت من الباكراوند وعرضه في الداشبورد
             if (data.action === 'SLOT_200_OK_FOUND') {
                 wss.clients.forEach(c => { 
                     if (c.isDashboard && c.readyState === WebSocket.OPEN) {
